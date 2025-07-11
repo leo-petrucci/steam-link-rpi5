@@ -97,11 +97,7 @@ WantedBy=default.target
 Then to activate this run:
 
 ```
-systemctl --user daemon-reload
-```
-
-```
-systemctl --user enable steamlink
+systemctl --user daemon-reload && systemctl --user enable steamlink
 ```
 
 ## Set volume to max
@@ -113,7 +109,6 @@ nano ~/.config/systemd/user/set-volume.service
 ```
 
 Then paste:
-
 ```
 [Unit]
 Description=Set HDMI volume to 100%
@@ -128,15 +123,151 @@ WantedBy=default.target
 ```
 
 Then to activate this run:
+```
+systemctl --user daemon-reload && systemctl --user enable set-volume
+```
+
+
+## Disable Wi-Fi power saving
+
+The RaspberryPi comes with a powersaving mode for Wi-Fi. If you're planning to use Steam Link on Wi-Fi then disabling powersaving is a must to get a good stream. Run:
 
 ```
-systemctl --user daemon-reload
+sudo nano /etc/systemd/system/wifi-powermanagement-off.service
 ```
 
+Then paste:
 ```
-systemctl --user enable set-volume
+[Unit]
+Description=Disable WiFi Power Management
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/iw dev wlan0 set power_save off
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then run:
+```
+sudo systemctl daemon-reload && sudo systemctl enable wifi-powermanagement-off.service
 ```
 
 ## Enable CEC
 
-CEC a signal that we can send to TVs so that they know to switch to a specific source. Here we use it to automatically switch to the HDMI the RaspberryPi is connected to whenever an input from the controller is received.
+CEC a signal that we can send to TVs so that they know to turn on or switch to a specific source . Here we use it to automatically switch to the HDMI the RaspberryPi is connected to whenever an input from the controller is received.
+
+This is by no means necessary, but I find it makes the UX much better.
+
+Install:
+```
+sudo apt install cec-utils -y
+```
+
+Then:
+```
+sudo apt install python3-evdev
+```
+
+Then create the service:
+```
+sudo nano /etc/systemd/system/cec-wakeup.service
+```
+
+Paste:
+```
+[Unit]
+Description=Smart Timer CEC Controller Service
+After=network-online.target
+
+[Service]
+Type=simple
+User=leonardo
+ExecStart=/usr/bin/python3 /home/leonardo/cec-utils/cec_wakeup.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then we're actually going to create the script itself:
+```
+mkdir ~/cec-utils && nano ~/cec-utils/cec_wakeup.py
+```
+
+Then paste:
+```
+import os
+import time
+from evdev import InputDevice, list_devices, ecodes
+
+# --- Configuration ---
+CEC_COMMAND = "echo 'as' | cec-client -s -d 1"
+# How many seconds to wait before another CEC signal can be sent.
+# Prevents spamming the TV.
+COOLDOWN_SECONDS = 30
+RESCAN_INTERVAL = 10
+# --- End Configuration ---
+
+# A global variable to track when the last command was sent.
+last_sent_time = 0
+
+
+def find_gamepads():
+    """Scans for and returns a list of connected gamepad devices."""
+    try:
+        devices = [InputDevice(path) for path in list_devices()]
+        gamepads = [dev for dev in devices if dev.capabilities().get(ecodes.EV_KEY) and (
+            ecodes.BTN_GAMEPAD in dev.capabilities()[ecodes.EV_KEY] or
+            ecodes.BTN_A in dev.capabilities()[ecodes.EV_KEY]
+        )]
+        return gamepads
+    except Exception as e:
+        print(f"Error listing devices: {e}")
+        return []
+
+
+if __name__ == "__main__":
+    print("Smart Timer CEC Service Started.")
+    while True:
+        gamepads = find_gamepads()
+
+        if not gamepads:
+            print(f"No gamepads found. Re-scanning in {RESCAN_INTERVAL} seconds...")
+            time.sleep(RESCAN_INTERVAL)
+            continue
+
+        print(f"Listening for input on: {[dev.name for dev in gamepads]}")
+
+        for gamepad in gamepads:
+            try:
+                print(f"--- Now listening continuously on {gamepad.name} ---")
+                for event in gamepad.read_loop():
+                    if (event.type == ecodes.EV_KEY or
+                       (event.type == ecodes.EV_ABS and abs(event.value) > 128)):
+
+                        # --- NEW TIMER LOGIC ---
+                        current_time = time.time()
+                        if (current_time - last_sent_time) > COOLDOWN_SECONDS:
+                            print(f"Input on {gamepad.name}. Cooldown has passed. Sending CEC command.")
+                            os.system(CEC_COMMAND)
+                            # Update the time the last command was sent.
+                            last_sent_time = current_time
+                        #else:
+                        #    remaining_time = COOLDOWN_SECONDS - (current_time - last_sent_time)
+                        #    print(f"Input on {gamepad.name}. In cooldown. Ignoring for {remaining_time:.1f} more seconds.")
+
+            except (OSError, IOError) as e:
+                print(f"Controller '{gamepad.name}' disconnected or caused an error: {e}")
+                break
+```
+
+> [!NOTE]
+> The above script constantly listens for controller buttons being pressed. Won't work for mouse or keyboard. If you know what you're doing feel free to modify it!
+
+Then we'll enable it:
+```
+sudo systemctl daemon-reload && sudo systemctl enable cec-wakeup.service
+```
