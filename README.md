@@ -100,6 +100,109 @@ Then to activate this run:
 systemctl --user daemon-reload && systemctl --user enable steamlink
 ```
 
+## Run Steam Link in a fullscreen session with Cage
+
+The desktop autostart above runs Steam Link on the normal desktop. To use a clean, single-app Wayland session instead, run Steam Link with Cage. Cage fills the display with one application. Kanshi sets the display mode.
+
+This setup follows the [Raspberry Pi forum instructions](https://forums.raspberrypi.com/viewtopic.php?p=2345558#p2345558). The forum recommends Kanshi instead of `wlr-randr` for display mode management.
+
+Install Cage and Kanshi:
+
+```
+sudo apt install cage kanshi
+```
+
+Create a Kanshi profile. Change the output, resolution, and refresh rate to values supported by your display:
+
+```
+mkdir -p ~/.config/kanshi
+nano ~/.config/kanshi/config
+```
+
+For example:
+
+```
+profile {
+    output HDMI-A-1 enable mode 1920x1080@60.000 position 0,0 transform normal
+}
+```
+
+Create a script that starts Kanshi and restarts Steam Link if it exits:
+
+```
+mkdir -p ~/steamlink-utils
+nano ~/steamlink-utils/steamlink-cage.sh
+```
+
+Paste this script:
+
+```
+#!/bin/bash
+
+kanshi &
+sleep 5
+while true; do
+        steamlink
+        sleep 5
+done
+```
+
+Make the script executable:
+
+```
+chmod +x ~/steamlink-utils/steamlink-cage.sh
+```
+
+Create a system service so Cage can start on the console terminal at boot:
+
+```
+sudo nano /etc/systemd/system/steamlink-cage.service
+```
+
+Paste this service. Change `leonardo` if your Linux user has a different name:
+
+```
+[Unit]
+Description=Steam Link Kiosk (Cage on tty1)
+After=systemd-logind.service network-online.target
+Wants=network-online.target
+Conflicts=getty@tty1.service
+
+[Service]
+User=leonardo
+Group=leonardo
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+PAMName=login
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+WorkingDirectory=/home/leonardo
+ExecStart=/usr/bin/cage -s /home/leonardo/steamlink-utils/steamlink-cage.sh
+Restart=always
+RestartSec=3
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target
+```
+
+If you enabled the desktop user service above, disable it so it does not start a second Steam Link process:
+
+```
+systemctl --user disable --now steamlink.service
+```
+
+Enable and start the Cage service:
+
+```
+sudo systemctl daemon-reload
+sudo systemctl enable --now steamlink-cage.service
+```
+
 ## Set volume to max
 
 By default the volume of your Rpi will be at 40%. Just in case something causes it to reset, we'll create a service that sets it to max, that way you can just adjust the volume from your TV. Run:
