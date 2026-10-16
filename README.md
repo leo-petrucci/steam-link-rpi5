@@ -207,15 +207,10 @@ sudo systemctl enable --now steamlink-cage.service
 
 Some Raspberry Pi 5 systems use a slow USB polling rate for the Steam Controller. Steam Link can detect this and open a terminal to run its polling-rate helper. The helper sets the rate to 2 ms and rebinds the Steam Controller input interfaces. Run it as a system service before Cage starts so Steam Link sees the correct rate and does not open the polling prompt at startup.
 
-This setup uses the helper installed by Steam Link. Start Steam Link once first so the app has downloaded its files. Then create the service:
+This setup uses the helper installed by Steam Link. Start Steam Link once first so the app has downloaded its files. Sign in as the same user that runs Steam Link, then run this block. The shell fills in your home directory, so you do not need to edit a username in the service:
 
 ```
-sudo nano /etc/systemd/system/steamlink-polling-rate.service
-```
-
-Paste this unit. Change `leonardo` if your Linux user has a different name:
-
-```
+sudo tee /etc/systemd/system/steamlink-polling-rate.service >/dev/null <<EOF
 [Unit]
 Description=Set Steam Controller USB polling rate
 After=systemd-udev-trigger.service
@@ -223,18 +218,16 @@ Before=steamlink-cage.service
 
 [Service]
 Type=oneshot
-ExecStart=/home/leonardo/.local/share/SteamLink/bin/set_polling_rate.sh 2
+ExecStart=$HOME/.local/share/SteamLink/bin/set_polling_rate.sh 2
 
 [Install]
 WantedBy=multi-user.target
-```
-
-Enable the service. Reboot after setup to apply the rate before Steam Link starts:
-
-```
+EOF
 sudo systemctl daemon-reload
 sudo systemctl enable steamlink-polling-rate.service
 ```
+
+Reboot after setup to apply the rate before Steam Link starts.
 
 Steam Link can also open a terminal to install its udev rule. The rule gives the `input` and `plugdev` groups access to the controller's USB and HID devices. Install the bundled rule and module-load file once to prevent this setup prompt:
 
