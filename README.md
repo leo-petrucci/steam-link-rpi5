@@ -106,11 +106,52 @@ The desktop autostart above runs Steam Link on the normal desktop. To use a clea
 
 This setup follows the [Raspberry Pi forum instructions](https://forums.raspberrypi.com/viewtopic.php?p=2345558#p2345558). The forum recommends Kanshi instead of `wlr-randr` for display mode management.
 
-Install Cage and Kanshi:
+Install Cage, Kanshi, and ydotool:
 
 ```
-sudo apt install cage kanshi
+sudo apt install cage kanshi ydotool ydotoold
 ```
+
+ydotool moves the pointer through Linux input, so Cage receives the movement. Its daemon needs access to `/dev/uinput`. Enable the device and add your user to the `input` group:
+
+```
+sudo modprobe uinput
+sudo usermod -aG input "$USER"
+```
+
+The group change takes effect after you log out or reboot. To load `uinput` on each boot, follow the Steam Link udev setup in [Fix Steam Controller lag and startup prompts](#fix-steam-controller-lag-and-startup-prompts) below.
+
+Create a user service for the ydotool daemon:
+
+```
+nano ~/.config/systemd/user/ydotoold.service
+```
+
+Paste:
+
+```
+[Unit]
+Description=ydotool virtual input daemon
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ydotoold
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+```
+
+Enable the service:
+
+```
+systemctl --user daemon-reload
+systemctl --user enable --now ydotoold.service
+```
+
+This user service starts at boot because linger was enabled in the earlier autostart section.
 
 Create a Kanshi profile. Change the output, resolution, and refresh rate to values supported by your display:
 
@@ -142,10 +183,18 @@ Paste this script:
 kanshi &
 sleep 5
 while true; do
-        steamlink
+        steamlink &
+        steamlink_pid=$!
+        sleep 5
+        for move_step in 1 2 3 4 5; do
+                ydotool mousemove 2000 2000
+        done
+        wait "$steamlink_pid"
         sleep 5
 done
 ```
+
+After Steam Link starts, the script sends five smaller pointer movements to move the cursor to the bottom-right edge. These relative movements work across normal TV resolutions. A single very large movement can put the cursor at the wrong edge.
 
 Make the script executable:
 
