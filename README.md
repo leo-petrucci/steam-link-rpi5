@@ -203,6 +203,52 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now steamlink-cage.service
 ```
 
+## Fix Steam Controller lag and startup prompts
+
+Some Raspberry Pi 5 systems use a slow USB polling rate for the Steam Controller. Steam Link can detect this and open a terminal to run its polling-rate helper. The helper sets the rate to 2 ms and rebinds the Steam Controller input interfaces. Run it as a system service before Cage starts so Steam Link sees the correct rate and does not open the polling prompt at startup.
+
+This setup uses the helper installed by Steam Link. Start Steam Link once first so the app has downloaded its files. Then create the service:
+
+```
+sudo nano /etc/systemd/system/steamlink-polling-rate.service
+```
+
+Paste this unit. Change `leonardo` if your Linux user has a different name:
+
+```
+[Unit]
+Description=Set Steam Controller USB polling rate
+After=systemd-udev-trigger.service
+Before=steamlink-cage.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/leonardo/.local/share/SteamLink/bin/set_polling_rate.sh 2
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable the service. Reboot after setup to apply the rate before Steam Link starts:
+
+```
+sudo systemctl daemon-reload
+sudo systemctl enable steamlink-polling-rate.service
+```
+
+Steam Link can also open a terminal to install its udev rule. The rule gives the `input` and `plugdev` groups access to the controller's USB and HID devices. Install the bundled rule and module-load file once to prevent this setup prompt:
+
+```
+sudo cp -v ~/.local/share/SteamLink/udev/modules-load.d/* /etc/modules-load.d/
+sudo modprobe uinput
+sudo cp -v ~/.local/share/SteamLink/udev/rules.d/56-steamlink.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+sudo usermod -a -G input,plugdev "$USER"
+```
+
+Reboot so the updated device permissions and group membership take effect.
+
 ## Set volume to max
 
 By default the volume of your Rpi will be at 40%. Just in case something causes it to reset, we'll create a service that sets it to max, that way you can just adjust the volume from your TV. Run:
